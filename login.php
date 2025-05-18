@@ -24,6 +24,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $_SESSION["user_id"] = $id;
                 $_SESSION["username"] = $user;
                 $_SESSION["is_admin"] = ($is_admin == 1);
+
+                // Store this session_id in the users table for force logout feature
+                $session_id = session_id();
+                $stmt2 = $conn->prepare("UPDATE users SET session_id = ? WHERE id = ?");
+                $stmt2->bind_param("si", $session_id, $id);
+                $stmt2->execute();
+                $stmt2->close();
+
                 header("Location: index.php");
                 exit;
             } else {
