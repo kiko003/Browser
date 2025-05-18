@@ -6,19 +6,133 @@ if (!isset($_SESSION["loggedin"]) || $_SESSION["loggedin"] !== true) {
 }
 $isAdmin = isset($_SESSION["is_admin"]) && $_SESSION["is_admin"];
 $username = isset($_SESSION["username"]) ? $_SESSION["username"] : "";
+$user_id = isset($_SESSION["user_id"]) ? $_SESSION["user_id"] : 0;
+
+// --- Check user approval status for VM request button ---
+require_once "db.php";
+$stmt = $conn->prepare("SELECT approved FROM users WHERE id = ?");
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$stmt->bind_result($approved);
+$stmt->fetch();
+$stmt->close();
+$isApproved = ($approved == 1);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
    <meta charset="UTF-8">
    <title>Welcome, <?php echo htmlspecialchars($username); ?>!</title>
-   <link rel="stylesheet" href="styles.css?v=2">
+   <link rel="stylesheet" href="styles.css?v=5">
    <style>
-      #hyperbeamContainer { display: none; }
-      .admin-title { color: #8e44ad; }
-      .user-title { color: #28a745; }
+      #bottomHeader {
+        transition: bottom 0.3s, opacity 0.3s;
+        z-index: 101;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #222;
+        color: #fff;
+        padding: 16px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 2px solid #333;
+      }
+      #bottomHeader.hide {
+        bottom: -70px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      #footerToggleBtn {
+        position: fixed;
+        bottom: 12px;
+        left: 8px;
+        z-index: 102;
+        width: 36px;
+        height: 36px;
+        background: #232323;
+        color: #fff;
+        border: none;
+        border-radius: 50%;
+        box-shadow: 0 2px 8px #0005;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+        cursor: pointer;
+        outline: none;
+      }
+      #footerToggleBtn:hover {
+        background: #444;
+      }
+      #footerToggleBtn svg {
+        transition: transform 0.3s;
+      }
+      #footerToggleBtn.collapsed svg {
+        transform: rotate(180deg);
+      }
+      body {
+        padding-bottom: 80px; /* Space for fixed bottom bar */
+      }
+      #dashboardMain {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 70vh;
+        padding: 30px 0 0 0;
+      }
+      /* --- Hyperbeam Fullscreen Styles --- */
+      #hyperbeamContainer {
+        position: fixed;
+        left: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 10000;
+        background: #111;
+        display: none;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: stretch;
+        margin: 0;
+        padding: 0;
+      }
+      #hyperbeamContainer.active {
+        display: flex;
+      }
+      #virtualComputerDiv {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        background: #111;
+        border-radius: 0;
+        box-shadow: none;
+        flex: 1 1 auto;
+      }
+      @media (max-width: 600px) {
+        #bottomHeader { padding: 12px 6px; font-size: 0.98em; }
+        #footerToggleBtn { bottom: 8px; left: 4px; width: 32px; height: 32px; }
+        body { padding-bottom: 66px; }
+      }
    </style>
-   <script type="module">
+   <script>
+      // Hide/show footer bar logic
+      document.addEventListener("DOMContentLoaded", function () {
+         const footer = document.getElementById('bottomHeader');
+         const btn = document.getElementById('footerToggleBtn');
+         let footerVisible = true;
+         btn.onclick = function() {
+           footerVisible = !footerVisible;
+           footer.classList.toggle('hide', !footerVisible);
+           btn.classList.toggle('collapsed', !footerVisible);
+         };
+      });
+
       // ----- Auto-Logout Timer -----
       var sessionTimeoutSeconds = <?php echo $isAdmin ? 3600 : 1800; ?>;
       var logoutTimer;
@@ -32,38 +146,44 @@ $username = isset($_SESSION["username"]) ? $_SESSION["username"] : "";
       document.addEventListener("keypress", resetLogoutTimer);
       resetLogoutTimer();
 
-      // ----- Auto-Hiding Header Logic -----
-      let header;
-      let headerHideTimer;
-      function showHeader() {
-         header.classList.remove("hidden");
-         clearTimeout(headerHideTimer);
-         headerHideTimer = setTimeout(function(){
-            header.classList.add("hidden");
-         }, 3000);
-      }
-      window.addEventListener("load", function(){
-         header = document.getElementById("topHeader");
-         showHeader();
-         document.addEventListener("mousemove", function(e) {
-            if (e.clientY < 50) { showHeader(); }
-         });
-         header.addEventListener("mouseover", showHeader);
-         header.addEventListener("mouseout", function(){
-            headerHideTimer = setTimeout(function(){
-               header.classList.add("hidden");
-            }, 3000);
-         });
+      // VM Fullscreen open logic (with session check)
+      document.addEventListener("DOMContentLoaded", function () {
+         var showVmBtn = document.getElementById('showVmBtn');
+         var hyperbeamContainer = document.getElementById('hyperbeamContainer');
+         var welcomeBox = document.getElementById('welcomeBox');
+         if (showVmBtn) {
+            showVmBtn.addEventListener('click', async function() {
+               // SESSION CHECK BEFORE SHOWING VM
+               try {
+                   const res = await fetch('session-check.php', { credentials: 'same-origin' });
+                   const data = await res.json();
+                   if (!data.valid) {
+                       alert('Your session has expired. Please log in again.');
+                       window.location = 'login.php';
+                       return;
+                   }
+                   // Proceed to show VM if session is valid
+                   welcomeBox.style.display = 'none';
+                   hyperbeamContainer.classList.add('active');
+                   if (window.initVirtualComputer) window.initVirtualComputer();
+               } catch (error) {
+                   alert('Session check failed. Please try again.');
+                   window.location = 'login.php';
+               }
+            });
+         }
       });
-
-      // ----- Hyperbeam VM Initialization (on demand) -----
+   </script>
+   <script type="module">
       import Hyperbeam from "https://unpkg.com/@hyperbeam/web@latest/dist/index.js";
-      let hyperbeamInstance = null;
-      async function initVirtualComputer() {
+      window.initVirtualComputer = async function() {
          try {
              const response = await fetch("computer.php");
              const data = await response.json();
-             hyperbeamInstance = await Hyperbeam(document.getElementById("virtualComputerDiv"), data.embed_url);
+             const hyperbeamInstance = await Hyperbeam(
+                document.getElementById("virtualComputerDiv"),
+                data.embed_url
+             );
              hyperbeamInstance.onReady(() => {
                 console.log("Hyperbeam session is ready!");
              });
@@ -71,55 +191,59 @@ $username = isset($_SESSION["username"]) ? $_SESSION["username"] : "";
              console.error("Error initializing Hyperbeam session:", error);
          }
       }
-      window.addEventListener("DOMContentLoaded", function() {
-         document.getElementById('showVmBtn').addEventListener('click', function() {
-            document.getElementById('welcomeBox').style.display = 'none';
-            document.getElementById('hyperbeamContainer').style.display = 'block';
-            initVirtualComputer();
-         });
-      });
    </script>
 </head>
 <body>
-   <header id="topHeader">
-      <span>
-         <strong><?php echo $isAdmin ? 'Admin' : 'User'; ?> Panel</strong>
-         &nbsp;|&nbsp;
-         Welcome, <?php echo htmlspecialchars($username); ?>!
-      </span>
-      <nav>
-         <a href="index.php">Main Page</a>
-         <?php if($isAdmin) { ?>
-            <a href="admin.php">Admin Panel</a>
-         <?php } ?>
-         <a href="logout.php">Logout</a>
-      </nav>
-   </header>
-   <main>
-      <div class="form-box" style="max-width: 600px;" id="welcomeBox">
-         <h2 style="margin-bottom:18px;">
-            <?php if ($isAdmin): ?>
-               <span class="admin-title">HEY ADMIN!</span>
-            <?php else: ?>
-               <span class="user-title">Welcome</span>
-            <?php endif; ?>
-         </h2>
-         <p style="text-align:center; margin: 0 0 15px 0;">
-            Hello, <strong><?php echo htmlspecialchars($username); ?></strong>!
-            <?php if ($isAdmin): ?>
-               <br>You are logged in as <strong>admin</strong>.<br>
-               Use the Admin Panel to manage users and VMs.<br>
-            <?php else: ?>
-               <br>You are logged in.<br>
-               Use the menu above to navigate.<br>
-            <?php endif; ?>
-         </p>
-         <button id="showVmBtn" class="action-btn" style="margin-top:18px;">Show My Virtual Machine</button>
-      </div>
-        <div id="hyperbeamContainer" style="width:100%;">
-            <div id="virtualComputerDiv" style="width:100%; height:600px;"></div>
-        </div>
+   <main id="dashboardMain">
+      <div class="form-box" id="welcomeBox">
+         <?php if ($isAdmin): ?>
+            <div class="admin-title">HEY ADMIN!</div>
+            <div class="welcome-msg">
+               Hello, <span class="admin-highlight"><?php echo strtoupper(htmlspecialchars($username)); ?></span>!
+            </div>
+            <div class="desc">
+               You are logged in as <span class="admin-highlight">admin</span>.<br>
+               Use the Admin Panel to manage users and VMs.
+            </div>
+         <?php else: ?>
+            <div class="user-title">Welcome!</div>
+            <div class="welcome-msg">
+               Hello, <span class="admin-highlight"><?php echo htmlspecialchars($username); ?></span>!
+            </div>
+            <div class="desc">
+               You are logged in.<br>
+               Use the menu below to navigate.
+            </div>
+         <?php endif; ?>
+         <?php if ($isApproved): ?>
+            <button id="showVmBtn" class="action-btn approve-btn">Show My Virtual Machine</button>
+         <?php else: ?>
+            <div class="error" style="width: 100%; text-align:center;">You must be approved by an admin before requesting a machine.</div>
+         <?php endif; ?>
       </div>
    </main>
+   <!-- Hyperbeam VM Fullscreen Container (outside main) -->
+   <div id="hyperbeamContainer">
+      <div id="virtualComputerDiv"></div>
+   </div>
+   <button id="footerToggleBtn" title="Hide/Show Footer" aria-label="Hide/Show Footer">
+      <svg width="20" height="20" viewBox="0 0 20 20">
+        <polyline points="7,12 10,9 13,12" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+   </button>
+   <footer>
+      <div id="bottomHeader">
+         <span>
+            Welcome, <?php echo htmlspecialchars($username); ?>!
+         </span>
+         <nav>
+            <a href="index.php">Main Page</a>
+            <?php if($isAdmin) { ?>
+               <a href="admin.php">Admin Panel</a>
+            <?php } ?>
+            <a href="logout.php">Logout</a>
+         </nav>
+      </div>
+   </footer>
 </body>
 </html>
