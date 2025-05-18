@@ -1,4 +1,3 @@
-<link rel="stylesheet" href="styles.css?v=2">
 <?php
 session_start();
 include "db.php";
@@ -98,13 +97,45 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
     }
     $stmt->close();
 }
+
+// Build arrays for VM sessions and PHP sessions
+$userVMSessions = [];
+$resultVM = $conn->query("SELECT user_id FROM hyperbeam_sessions");
+while ($rowVM = $resultVM->fetch_assoc()) {
+    $userVMSessions[$rowVM['user_id']] = true;
+}
+
+$userPHPSessions = [];
+$resultPHP = $conn->query("SELECT id, session_id FROM users");
+while ($rowPHP = $resultPHP->fetch_assoc()) {
+    if (!empty($rowPHP['session_id'])) {
+        $userPHPSessions[$rowPHP['id']] = true;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Admin Panel - Manage Users</title>
+  <title>WFM!</title>
   <link rel="stylesheet" href="styles.css?v=10">
+  <style>
+    /* Force Logout Button Blue Styling */
+    .force-logout-btn {
+        background: #2980f3 !important;
+        color: #fff !important;
+    }
+    .force-logout-btn:hover {
+        background: #1451a3 !important;
+    }
+    .force-logout-btn.disabled, .action-btn.force-logout-btn.disabled {
+        background: #555 !important;
+        color: #bbb !important;
+        cursor: not-allowed !important;
+        pointer-events: none;
+        opacity: .6;
+    }
+  </style>
 </head>
 <body>
   <header id="topHeader">
@@ -138,12 +169,6 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
             <th>Actions</th>
           </tr>
           <?php
-          $userSessions = [];
-          $sessResult = $conn->query("SELECT user_id FROM hyperbeam_sessions");
-          while ($sessRow = $sessResult->fetch_assoc()) {
-              $userSessions[$sessRow['user_id']] = true;
-          }
-
           $result = $conn->query("SELECT id, username, approved, is_admin, vm_blocked FROM users");
           while ($row = $result->fetch_assoc()) {
               echo "<tr>";
@@ -155,8 +180,8 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
               echo "<td>";
               if ($row['id'] != $_SESSION["user_id"]) {
                   echo "<div class='actions-row'>";
-                  
-                  // Toggle Approve/Deny (Brown, broken glass icon)
+
+                  // Toggle Approve/Deny
                   $toggleText = ($row['approved'] == 1) ? "Deny" : "Approve";
                   $toggleTitle = ($row['approved'] == 1) ? "Deny this user" : "Approve this user";
                   echo "<a class='action-btn disable-btn' href='admin.php?action=toggle_approve&id=" . $row['id'] . "' title='" . $toggleTitle . "' onclick='return confirm(\"Are you sure you want to $toggleText this user?\");'>
@@ -171,7 +196,7 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
                           <span class='btn-text'>$toggleText</span>
                       </a>";
 
-                  // DELETE BUTTON (Red)
+                  // DELETE BUTTON
                   echo "<a class='action-btn delete-btn' href='admin.php?action=delete&id=" . $row['id'] . "' onclick='return confirm(\"Delete user " . htmlspecialchars($row['username']) . "?\");'>
                       <span class='btn-icon'>
                           <svg width='20' height='20' viewBox='0 0 20 20'>
@@ -182,8 +207,8 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
                       <span class='btn-text'>Delete</span>
                   </a>";
 
-                  // Terminate VM button (Orange)
-                  if (isset($userSessions[$row['id']])) {
+                  // Terminate VM button (only if user has VM session)
+                  if (isset($userVMSessions[$row['id']])) {
                       echo "<a class='action-btn terminate-btn' href='terminate_vm.php?user_id=" . $row['id'] . "' onclick='return confirm(\"Terminate the VM session for " . htmlspecialchars($row['username']) . "?\");'>
                           <span class='btn-icon'>
                               <svg width='20' height='20' viewBox='0 0 20 20'>
@@ -203,7 +228,7 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
                       </span>";
                   }
 
-                  // Block/Unblock VM (Purple)
+                  // Block/Unblock VM
                   if ($row['vm_blocked'] == 0) {
                       echo "<a class='action-btn block-vm-btn' href='admin.php?action=block_vm&id=" . $row['id'] . "' onclick='return confirm(\"Block this user from requesting new VMs?\");'>
                           <span class='btn-icon'>
@@ -217,6 +242,33 @@ if (isset($_GET['action']) && ($_GET['action'] == 'block_vm' || $_GET['action'] 
                   } else {
                       echo "<a class='action-btn approve-btn' href='admin.php?action=unblock_vm&id=" . $row['id'] . "' onclick='return confirm(\"Unblock this user for VM requests?\");'>Unblock VM</a>";
                   }
+
+                  // Force Logout Button (active only if user has PHP session)
+                  if (isset($userPHPSessions[$row['id']])) {
+                      echo "<form method='POST' action='force_logout.php' style='display:inline; margin:0; padding:0; vertical-align:middle;' onsubmit='return confirm(\"Force logout this user? This will end all active sessions for " . htmlspecialchars($row['username']) . ".\");'>
+                          <input type='hidden' name='user_id' value='" . $row['id'] . "'>
+                          <button type='submit' class='action-btn force-logout-btn'>
+                              <span class='btn-icon'>
+                                  <svg width='20' height='20' viewBox='0 0 20 20'>
+                                      <circle cx='10' cy='10' r='7' stroke='#fff' stroke-width='1.5' fill='none'/>
+                                      <line x1='5' y1='10' x2='15' y2='10' stroke='#fff' stroke-width='1.5'/>
+                                  </svg>
+                              </span>
+                              <span class='btn-text'>Force Logout</span>
+                          </button>
+                      </form>";
+                  } else {
+                      echo "<span class='action-btn force-logout-btn disabled' title='User is not logged in.'>
+                          <span class='btn-icon'>
+                              <svg width='20' height='20' viewBox='0 0 20 20'>
+                                  <circle cx='10' cy='10' r='7' stroke='#fff' stroke-width='1.5' fill='none'/>
+                                  <line x1='5' y1='10' x2='15' y2='10' stroke='#fff' stroke-width='1.5'/>
+                              </svg>
+                          </span>
+                          <span class='btn-text'>Force Logout</span>
+                      </span>";
+                  }
+
                   echo "</div>";
               } else {
                   echo "N/A";
