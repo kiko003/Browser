@@ -21,12 +21,40 @@ if ($vm_blocked == 1) {
 
 $user_id = (int) $_SESSION["user_id"];
 
-// (Optional) Check for an existing Hyperbeam session.
+// Check for an existing Hyperbeam session.
 $query = "SELECT session_data, last_activity FROM hyperbeam_sessions WHERE user_id = $user_id LIMIT 1";
 $result = $conn->query($query);
 
 if ($result && $result->num_rows > 0) {
     $row = $result->fetch_assoc();
+
+    // Determine timeout (admin vs user)
+    $timeoutSeconds = (isset($_SESSION["is_admin"]) && $_SESSION["is_admin"]) ? 3600 : 1800;
+
+    $lastActivity = strtotime($row["last_activity"]);
+    if (time() - $lastActivity > $timeoutSeconds) {
+        // Timeout reached, terminate the VM before cleanup
+        $session = json_decode($row["session_data"], true);
+        if (isset($session['session_id'])) {
+            $api_key = "sk_live_b0ju1qsONugJhZwETBXv7V-YoBGA7fZXkqesOYNyYJ4";
+            $terminate_url = "https://engine.hyperbeam.com/v0/vm/" . urlencode($session['session_id']);
+            $ch = curl_init($terminate_url);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                "Content-Type: application/json",
+                "Authorization: Bearer $api_key",
+            ]);
+            curl_exec($ch); // Optionally, check the response for success/failure
+            curl_close($ch);
+        }
+        // Delete the session from database
+        $conn->query("DELETE FROM hyperbeam_sessions WHERE user_id = $user_id");
+        header("Content-Type: application/json");
+        echo json_encode(["error" => "VM session expired due to inactivity and has been terminated."]);
+        exit;
+    }
+
     // Update the last_activity timestamp.
     $conn->query("UPDATE hyperbeam_sessions SET last_activity = NOW() WHERE user_id = $user_id");
     header("Content-Type: application/json");
